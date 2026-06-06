@@ -1,0 +1,82 @@
+# Настройки сбора датасета
+
+sources:
+  babepedia:
+    enabled: true
+    # Основной список порноактрис (~17k записей, 172 страницы)
+    list_url: "https://www.babepedia.com/pornstartop100"
+    # Дополнительные нишевые списки (опционально)
+    extra_lists: []
+    #   - "https://www.babepedia.com/milfpornstartop100"
+    #   - "https://www.babepedia.com/asianpornstartop100"
+
+  theporndb:
+    enabled: false
+    # Требует TPDB_API_TOKEN в .env
+    api_base: "https://api.metadataapi.net"
+    per_page: 100
+
+filters:
+  # Минимальный год начала карьеры (для диапазона 5–20 лет от текущего года), было 2006
+  min_career_start: null
+  # Максимальный год окончания карьеры (null = без ограничения)
+  max_career_end: null
+  # Только женские профили
+  gender: female
+
+download:
+  # Задержка между запросами (секунды)
+  request_delay: 1.5
+  # Таймаут HTTP-запроса
+  timeout: 30
+  # Максимум фото на одну актрису
+  max_images_per_actress: 8
+  # Скачивать превью с листингов (быстрее, но ниже качество)
+  download_list_thumbnails: true
+  # Скачивать полные фото с профиля
+  download_profile_images: true
+
+face:
+  # Минимальная уверенность MTCNN (0–1)
+  min_face_probability: 0.90
+  # Сколько похожих актрис возвращать при поиске
+  search_top_k: 5
+
+nsfw:
+  enabled: true
+  labels_file: "data/metadata/nsfw_labels.json"
+  min_score: 0.4
+  batch_size: 8
+
+telegram:
+  top_k: 5
+  database: "data/bot.db"
+  limits:
+    enabled: false          # false — отключить все лимиты для теста
+    free_daily_limit: 3
+    timezone: "UTC"        # дата для сброса бесплатных запросов
+  payments:
+    stars_enabled: true
+    crypto_enabled: true
+    unlimited_days: 30     # срок безлимита за $5
+    pack_15:
+      credits: 15
+      stars: 250
+      usdt: "3"
+    unlimited:
+      stars: 400
+      usdt: "5"
+  analytics:
+    enabled: true
+    events_file: "logs/events.jsonl"
+  digest:
+    enabled: true
+    interval_hours: 0.02        # как часто слать одному юзеру
+    check_interval_minutes: 2  # как часто бот проверяет очередь
+
+paths:
+  raw_images: "data/raw"
+  metadata: "data/metadata"
+  processed: "data/processed"
+  index: "data/index"
+  logs: "logs"

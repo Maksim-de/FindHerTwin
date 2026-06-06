@@ -1,0 +1,13 @@
+---
+meta:
+  environment: python
+  toolchain:
+    name: pip
+    version: "3.12"
+
+build:
+  requirementsPath: requirements.txt
+
+run:
+  command: sh scripts/amvera_start.sh
+  persistenceMount: /data

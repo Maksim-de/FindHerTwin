@@ -1,0 +1,23 @@
+# Scraping
+httpx>=0.27.0
+cloudscraper>=1.2.71
+lxml>=5.2.0
+beautifulsoup4>=4.12.0
+python-dotenv>=1.0.0
+pyyaml>=6.0.1
+tqdm>=4.66.0
+Pillow>=10.3.0
+
+# Face recognition pipeline (~120 MB моделей при первом запуске)
+torch>=2.2.0
+torchvision>=0.17.0
+facenet-pytorch>=2.6.0
+opencv-python>=4.9.0
+numpy>=1.26.0
+faiss-cpu>=1.8.0
+
+# Telegram bot
+aiogram>=3.13.0
+
+# NSFW-разметка
+nudenet>=3.4.2
