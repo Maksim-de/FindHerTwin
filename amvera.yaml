@@ -6,7 +6,7 @@ meta:
     version: "3.12"
 
 build:
-  requirementsPath: requirements.txt
+  requirementsPath: requirements-amvera.txt
 
 run:
   command: sh scripts/amvera_start.sh
