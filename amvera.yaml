@@ -9,5 +9,5 @@ build:
   requirementsPath: requirements-amvera.txt
 
 run:
-  command: sh scripts/amvera_start.sh
+  scriptName: run_bot.py
   persistenceMount: /data
