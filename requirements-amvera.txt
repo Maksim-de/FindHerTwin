@@ -1,6 +1,5 @@
 # Production deps for Amvera (Linux, CPU only).
-# Полный torch с CUDA ~821 MB — на зеркале Amvera часто падает по hash.
-# CPU-колёса ~200 MB, для бота GPU не нужен.
+# facenet-pytorch 2.6.0 требует torch>=2.2,<2.3 — не ставить 2.5+.
 
 --index-url https://download.pytorch.org/whl/cpu
 --extra-index-url https://pypi.org/simple
@@ -10,8 +9,8 @@ pyyaml>=6.0.1
 Pillow>=10.2.0,<10.3.0
 numpy>=1.26.0,<2.0
 
-torch==2.5.1
-torchvision==0.20.1
-facenet-pytorch>=2.6.0
+torch==2.2.2
+torchvision==0.17.2
+facenet-pytorch==2.6.0
 
 aiogram>=3.13.0
