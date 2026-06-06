@@ -50,6 +50,7 @@ nsfw:
 
 telegram:
   top_k: 5
+  welcome_photo: "data/raw/elle_lovely/000.jpg"
   database: "data/bot.db"
   limits:
     enabled: true

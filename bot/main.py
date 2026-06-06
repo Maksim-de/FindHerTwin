@@ -74,6 +74,14 @@ async def main() -> None:
     temp_dir = PROJECT_ROOT / "bot" / "temp"
     temp_dir.mkdir(parents=True, exist_ok=True)
 
+    welcome_photo_cfg = telegram_cfg.get("welcome_photo")
+    welcome_photo = (
+        PROJECT_ROOT / welcome_photo_cfg if welcome_photo_cfg else None
+    )
+    if welcome_photo and not welcome_photo.exists():
+        logging.warning("welcome_photo не найден: %s", welcome_photo)
+        welcome_photo = None
+
     logging.info("Инициализация моделей поиска...")
     search_service = FaceSearchService(config_path)
     db = Database(db_path)
@@ -119,6 +127,7 @@ async def main() -> None:
         stars_enabled,
         crypto_enabled,
         temp_dir,
+        welcome_photo=welcome_photo,
     )
     search_router.message.middleware(middleware)
     search_router.callback_query.middleware(middleware)

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, FSInputFile, Message
 
 from bot.analytics import EventLogger
 from bot.menu import (
@@ -36,11 +36,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-@router.message(CommandStart())
-async def cmd_start(message: Message, usage_service: UsageService) -> None:
-    if message.from_user:
-        await usage_service.touch_user(message.from_user.id)
-
+def _welcome_text(usage_service: UsageService) -> str:
     limits_line = (
         f"🆓 {usage_service.free_daily_limit} бесплатных поиска в день"
         if usage_service.limits_enabled
@@ -48,15 +44,37 @@ async def cmd_start(message: Message, usage_service: UsageService) -> None:
     )
     pack = usage_service.products["pack_15"]
     unlimited = usage_service.products["unlimited"]
-    await message.answer(
+    return (
         "Привет! Я ищу похожих порноактрис по фото.\n\n"
-        "Отправьте фотографию девушки — верну top-5 совпадений из базы.\n\n"
+        "Отправьте фотографию девушки — верну top-5 похожих порноактрис.\n\n"
         f"{limits_line}\n"
         f"💎 {pack.credits} поисков — ${pack.usdt_amount}\n"
         f"♾ {unlimited.title} — ${unlimited.usdt_amount}\n\n"
-        "Меню внизу — поиск, тарифы, баланс.",
-        reply_markup=main_menu_keyboard(),
+        "Меню внизу — поиск, тарифы, баланс."
     )
+
+
+@router.message(CommandStart())
+async def cmd_start(
+    message: Message,
+    usage_service: UsageService,
+    welcome_photo: Path | None = None,
+) -> None:
+    if message.from_user:
+        await usage_service.touch_user(message.from_user.id)
+
+    text = _welcome_text(usage_service)
+    keyboard = main_menu_keyboard()
+
+    if welcome_photo and welcome_photo.exists():
+        await message.answer_photo(
+            FSInputFile(welcome_photo),
+            caption=text,
+            reply_markup=keyboard,
+        )
+        return
+
+    await message.answer(text, reply_markup=keyboard)
 
 
 @router.message(Command("help"))

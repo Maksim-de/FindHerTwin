@@ -20,6 +20,7 @@ class InjectMiddleware(BaseMiddleware):
         stars_enabled: bool,
         crypto_enabled: bool,
         temp_dir: Path,
+        welcome_photo: Path | None = None,
     ) -> None:
         super().__init__()
         self.search_service = search_service
@@ -28,6 +29,7 @@ class InjectMiddleware(BaseMiddleware):
         self.stars_enabled = stars_enabled
         self.crypto_enabled = crypto_enabled and crypto_pay.enabled
         self.temp_dir = temp_dir
+        self.welcome_photo = welcome_photo
 
     async def __call__(
         self,
@@ -41,6 +43,7 @@ class InjectMiddleware(BaseMiddleware):
         data["stars_enabled"] = self.stars_enabled
         data["crypto_enabled"] = self.crypto_enabled
         data["temp_dir"] = self.temp_dir
+        data["welcome_photo"] = self.welcome_photo
         if "analytics" not in data:
             data["analytics"] = None
         return await handler(event, data)
