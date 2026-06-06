@@ -4,7 +4,6 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-import faiss
 import numpy as np
 
 
@@ -17,8 +16,28 @@ class SearchResult:
     thumbnail: str | None = None
 
 
+def _normalize_l2_rows(vectors: np.ndarray) -> np.ndarray:
+    out = vectors.astype(np.float32).copy()
+    norms = np.linalg.norm(out, axis=1, keepdims=True)
+    norms = np.maximum(norms, 1e-12)
+    out /= norms
+    return out
+
+
+def _normalize_l2_vector(vector: np.ndarray) -> np.ndarray:
+    out = vector.astype(np.float32).reshape(-1).copy()
+    norm = float(np.linalg.norm(out))
+    if norm > 1e-12:
+        out /= norm
+    return out
+
+
 class FaceIndex:
-    """FAISS-индекс с агрегацией по актрисе (лучший score среди её лиц)."""
+    """Индекс лиц с агрегацией по актрисе (лучший score среди её лиц).
+
+    Поиск в рантайме — через numpy (без FAISS), чтобы на macOS не конфликтовать
+    с PyTorch. FAISS используется только при сборке индекса (build_index.py).
+    """
 
     def __init__(self, index_dir: Path) -> None:
         self.index_dir = index_dir
@@ -26,13 +45,13 @@ class FaceIndex:
         self.mapping_path = index_dir / "mapping.json"
         self.embeddings_path = index_dir / "embeddings.npy"
 
-        self.index: faiss.IndexFlatIP | None = None
         self.embeddings: np.ndarray | None = None
         self.mapping: dict = {}
 
     def build(self, embeddings: np.ndarray, mapping: dict) -> None:
-        vectors = embeddings.astype(np.float32).copy()
-        faiss.normalize_L2(vectors)
+        import faiss
+
+        vectors = _normalize_l2_rows(embeddings)
 
         index = faiss.IndexFlatIP(vectors.shape[1])
         index.add(vectors)
@@ -45,19 +64,26 @@ class FaceIndex:
             encoding="utf-8",
         )
 
-        self.index = index
         self.embeddings = vectors
         self.mapping = mapping
 
     def load(self) -> None:
-        if not self.index_path.exists() or not self.mapping_path.exists():
+        if not self.mapping_path.exists():
             raise FileNotFoundError(
                 f"Индекс не найден в {self.index_dir}. Сначала запустите build_index.py"
             )
-        self.index = faiss.read_index(str(self.index_path))
+        if not self.embeddings_path.exists():
+            raise FileNotFoundError(
+                f"embeddings.npy не найден в {self.index_dir}. "
+                "Сначала: python scripts/generate_embeddings.py"
+            )
+
         self.mapping = json.loads(self.mapping_path.read_text(encoding="utf-8"))
-        if self.embeddings_path.exists():
-            self.embeddings = np.load(self.embeddings_path)
+        self.embeddings = np.load(self.embeddings_path)
+
+    @property
+    def total_faces(self) -> int:
+        return int(self.embeddings.shape[0]) if self.embeddings is not None else 0
 
     def search(
         self,
@@ -65,31 +91,34 @@ class FaceIndex:
         top_k: int = 5,
         search_pool: int = 50,
     ) -> list[SearchResult]:
-        if self.index is None:
+        if self.embeddings is None:
             self.load()
 
-        assert self.index is not None
-        query = query_embedding.astype(np.float32).reshape(1, -1).copy()
-        faiss.normalize_L2(query)
+        assert self.embeddings is not None
+        query = _normalize_l2_vector(query_embedding)
+        scores = self.embeddings @ query
 
-        pool = min(search_pool, self.index.ntotal)
-        scores, indices = self.index.search(query, pool)
+        pool = min(search_pool, scores.shape[0])
+        if pool <= 0:
+            return []
+
+        candidate_idx = np.argpartition(-scores, pool - 1)[:pool]
+        candidate_idx = candidate_idx[np.argsort(-scores[candidate_idx])]
 
         entries = self.mapping["entries"]
         actresses_meta = self.mapping["actresses"]
 
         best_per_slug: dict[str, SearchResult] = {}
-        for score, idx in zip(scores[0], indices[0]):
-            if idx < 0:
-                continue
-            entry = entries[idx]
+        for idx in candidate_idx:
+            score = float(scores[idx])
+            entry = entries[int(idx)]
             slug = entry["slug"]
             if slug not in best_per_slug or score > best_per_slug[slug].score:
                 meta = actresses_meta.get(slug, {})
                 best_per_slug[slug] = SearchResult(
                     slug=slug,
                     name=meta.get("name", slug),
-                    score=float(score),
+                    score=score,
                     face_path=entry["face_path"],
                     thumbnail=meta.get("thumbnail"),
                 )
@@ -102,23 +131,18 @@ class FaceIndex:
     ) -> list[tuple[float, str]]:
         """Лица актрисы, отсортированные по похожести на query (убывание)."""
         if self.embeddings is None:
-            if self.embeddings_path.exists():
-                self.embeddings = np.load(self.embeddings_path)
-            else:
-                return []
+            self.load()
 
-        query = query_embedding.astype(np.float32).reshape(1, -1).copy()
-        faiss.normalize_L2(query)
-        q = query[0]
+        assert self.embeddings is not None
+        query = _normalize_l2_vector(query_embedding)
 
         ranked: list[tuple[float, str]] = []
         for entry in self.mapping["entries"]:
             if entry["slug"] != slug:
                 continue
             idx = entry["index"]
-            emb = self.embeddings[idx].astype(np.float32).copy()
-            faiss.normalize_L2(emb.reshape(1, -1))
-            score = float(np.dot(q, emb))
+            emb = self.embeddings[idx]
+            score = float(np.dot(query, emb))
             ranked.append((score, entry["face_path"]))
 
         ranked.sort(key=lambda item: item[0], reverse=True)
@@ -128,10 +152,9 @@ class FaceIndex:
         self, slug: str, face_num: str | None = None
     ) -> np.ndarray | None:
         if self.embeddings is None:
-            if self.embeddings_path.exists():
-                self.embeddings = np.load(self.embeddings_path)
-            else:
-                return None
+            self.load()
+
+        assert self.embeddings is not None
 
         target_path = None
         if face_num is not None:

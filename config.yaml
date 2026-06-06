@@ -52,9 +52,9 @@ telegram:
   top_k: 5
   database: "data/bot.db"
   limits:
-    enabled: false          # false — отключить все лимиты для теста
-    free_daily_limit: 3
-    timezone: "UTC"        # дата для сброса бесплатных запросов
+    enabled: true
+    free_daily_limit: 5
+    timezone: "UTC"        # дата для сброса бесплатных запросов (Europe/Moscow — для МСК)
   payments:
     stars_enabled: true
     crypto_enabled: true
@@ -71,8 +71,8 @@ telegram:
     events_file: "logs/events.jsonl"
   digest:
     enabled: true
-    interval_hours: 0.02        # как часто слать одному юзеру
-    check_interval_minutes: 2  # как часто бот проверяет очередь
+    interval_hours: 24        # как часто слать одному юзеру
+    check_interval_minutes: 30  # как часто бот проверяет очередь
 
 paths:
   raw_images: "data/raw"

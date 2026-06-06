@@ -50,6 +50,7 @@ def process_dataset(
         "input_images": 0,
         "faces_saved": 0,
         "no_face": 0,
+        "corrupt_images": 0,
         "actresses_with_faces": 0,
         "per_actress": {},
     }
@@ -71,10 +72,18 @@ def process_dataset(
 
         for src in images:
             stats["input_images"] += 1
+            if src.stat().st_size == 0:
+                logger.warning("Пустой файл, пропуск: %s", src)
+                stats["corrupt_images"] += 1
+                continue
+
             crop = detector.crop_from_path(src)
             if crop is None:
-                no_face += 1
-                stats["no_face"] += 1
+                if not detector.last_load_ok:
+                    stats["corrupt_images"] += 1
+                else:
+                    no_face += 1
+                    stats["no_face"] += 1
                 continue
 
             dest = out_dir / f"face_{saved:03d}.jpg"
@@ -129,11 +138,12 @@ def main() -> None:
     report_path.write_text(json.dumps(stats, ensure_ascii=False, indent=2), encoding="utf-8")
 
     logger.info(
-        "Готово: %d лиц из %d фото (%d актрис). Без лица: %d. Отчёт: %s",
+        "Готово: %d лиц из %d фото (%d актрис). Без лица: %d. Битых: %d. Отчёт: %s",
         stats["faces_saved"],
         stats["input_images"],
         stats["actresses_with_faces"],
         stats["no_face"],
+        stats["corrupt_images"],
         report_path,
     )
 

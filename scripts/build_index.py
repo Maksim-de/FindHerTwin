@@ -12,16 +12,18 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from pathlib import Path
+
+# До faiss/torch: только faiss, без загрузки PyTorch через face.__init__
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 import numpy as np
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
-
-import face.bootstrap  # noqa: F401, E402
 
 from face.index_store import FaceIndex
 

@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import numpy as np
 import torch
 from facenet_pytorch import MTCNN
-from PIL import Image
+from PIL import Image, ImageFile, UnidentifiedImageError
+
+logger = logging.getLogger(__name__)
+
+# Частично скачанные JPEG/WebP иногда читаются целиком
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 def get_device() -> torch.device:
@@ -38,6 +44,7 @@ class FaceDetector:
         self.margin = margin
         self.min_probability = min_probability
         self.device = device or get_detector_device()
+        self.last_load_ok = True
         self.mtcnn = MTCNN(
             image_size=image_size,
             margin=margin,
@@ -85,8 +92,15 @@ class FaceDetector:
         return torch.from_numpy(array.copy()).permute(2, 0, 1).byte()
 
     def crop_from_path(self, image_path: Path) -> torch.Tensor | None:
-        with Image.open(image_path) as img:
-            return self.detect_and_crop(img.convert("RGB"))
+        self.last_load_ok = True
+        try:
+            with Image.open(image_path) as img:
+                img.load()
+                return self.detect_and_crop(img.convert("RGB"))
+        except (OSError, UnidentifiedImageError) as exc:
+            self.last_load_ok = False
+            logger.warning("Повреждённый файл, пропуск: %s (%s)", image_path, exc)
+            return None
 
     @staticmethod
     def save_crop(face_tensor: torch.Tensor, output_path: Path) -> None:

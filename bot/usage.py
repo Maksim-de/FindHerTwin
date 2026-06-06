@@ -23,7 +23,7 @@ class UsageService:
         cfg = config or {}
         limits = cfg.get("limits", {})
         self.limits_enabled = bool(limits.get("enabled", True))
-        self.free_daily_limit = int(limits.get("free_daily_limit", 3))
+        self.free_daily_limit = int(limits.get("free_daily_limit", 5))
         self.timezone = ZoneInfo(limits.get("timezone", "UTC"))
 
         payments_cfg = cfg.get("payments", {})
