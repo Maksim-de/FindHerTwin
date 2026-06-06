@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Точка входа для Amvera: монтирует /data, при необходимости ставит заглушку, запускает бота."""
+"""Точка входа для Amvera: ставит заглушку датасета при необходимости и запускает бота."""
 
 from __future__ import annotations
 
@@ -15,16 +15,8 @@ import numpy as np
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parent
+DATA_ROOT = ROOT / "data"
 logger = logging.getLogger(__name__)
-
-
-def _link(target: Path, link: Path) -> None:
-    link.parent.mkdir(parents=True, exist_ok=True)
-    if link.is_symlink():
-        link.unlink()
-    elif link.exists():
-        return
-    link.symlink_to(target)
 
 
 def _is_real_index(index_dir: Path) -> bool:
@@ -38,16 +30,15 @@ def _is_real_index(index_dir: Path) -> bool:
     return not mapping.get("stub", False)
 
 
-def seed_stub_dataset() -> bool:
-    """Копирует минимальный индекс в /data, если реальный датасет ещё не загружен."""
-    data_root = Path("/data")
+def seed_stub_dataset(data_root: Path) -> bool:
+    """Копирует минимальный индекс, если реальный датасет ещё не загружен."""
     index_dir = data_root / "index"
 
     if _is_real_index(index_dir):
         return False
 
     if (index_dir / "mapping.json").is_file():
-        logger.warning("Индекс в /data помечен как stub — ждём загрузку полного датасета")
+        logger.warning("Индекс помечен как stub — ждём загрузку полного датасета в Amvera Data")
 
     bootstrap = ROOT / "bootstrap_data"
     if bootstrap.is_dir():
@@ -80,30 +71,17 @@ def seed_stub_dataset() -> bool:
     return True
 
 
-def setup_data_mount() -> None:
+def setup_data_dirs() -> None:
     os.chdir(ROOT)
-    (ROOT / "data").mkdir(exist_ok=True)
     (ROOT / "logs").mkdir(exist_ok=True)
-
     for name in ("raw", "processed", "index", "metadata"):
-        Path(f"/data/{name}").mkdir(parents=True, exist_ok=True)
-
-    seed_stub_dataset()
-
-    for name in ("raw", "processed", "index", "metadata"):
-        _link(Path(f"/data/{name}"), ROOT / "data" / name)
-
-    if Path("/data/bot.db").is_file():
-        _link(Path("/data/bot.db"), ROOT / "data" / "bot.db")
-
-    nsfw = Path("/data/metadata/nsfw_labels.json")
-    if nsfw.is_file():
-        _link(Path("/data/metadata/nsfw_labels.json"), ROOT / "data" / "metadata" / "nsfw_labels.json")
+        (DATA_ROOT / name).mkdir(parents=True, exist_ok=True)
+    seed_stub_dataset(DATA_ROOT)
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-    setup_data_mount()
+    setup_data_dirs()
     raise SystemExit(subprocess.call([sys.executable, "-m", "bot.main"], cwd=ROOT))
 
 

@@ -10,4 +10,5 @@ build:
 
 run:
   scriptName: run_bot.py
-  persistenceMount: /data
+  # Data монтируется прямо в /app/data — без симлинков с /data
+  persistenceMount: /app/data
