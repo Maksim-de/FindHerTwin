@@ -109,6 +109,9 @@ async def run_digest_scheduler(
     while True:
         try:
             await asyncio.sleep(check_minutes * 60)
+            if search_service.is_stub_dataset:
+                continue
+
             user_ids = await asyncio.to_thread(db.get_users_due_for_digest, interval_hours)
             if not user_ids:
                 continue

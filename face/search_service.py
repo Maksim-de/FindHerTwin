@@ -49,9 +49,14 @@ class FaceSearchService:
         self.top_k = face_cfg.get("search_top_k", 5)
         self.min_prob = face_cfg.get("min_face_probability", 0.90)
 
-        logger.info("Загрузка FAISS-индекса...")
+        logger.info("Загрузка индекса...")
         self.face_index = FaceIndex(self.index_dir)
         self.face_index.load()
+        self.is_stub_dataset = bool(self.face_index.mapping.get("stub", False))
+        if self.is_stub_dataset:
+            logger.warning(
+                "Датасет-заглушка: поиск отключён до загрузки index/ в Amvera Data"
+            )
 
         logger.info("Загрузка FaceNet (устройство: %s)...", get_device())
         self.detector = FaceDetector(min_probability=self.min_prob)

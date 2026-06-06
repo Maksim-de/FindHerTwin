@@ -35,6 +35,13 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
+STUB_DATASET_MESSAGE = (
+    "⏳ <b>Бот запущен, датасет ещё не загружен.</b>\n\n"
+    "В Amvera: Репозиторий → <b>Data</b> → загрузите папки "
+    "<code>index</code>, <code>raw</code>, <code>processed</code>, <code>metadata</code>.\n"
+    "После загрузки перезапустите приложение — поиск заработает."
+)
+
 
 def _welcome_text(usage_service: UsageService) -> str:
     limits_line = (
@@ -135,6 +142,10 @@ async def handle_photo(
         if analytics:
             await analytics.log(user_id, "limit_denied", action="photo_search")
         await message.answer(reason or "Лимит запросов исчерпан.", parse_mode="HTML")
+        return
+
+    if search_service.is_stub_dataset:
+        await message.answer(STUB_DATASET_MESSAGE, parse_mode="HTML")
         return
 
     status_msg = await message.answer("Анализирую фото…")
@@ -246,6 +257,10 @@ async def handle_similar(
         if analytics:
             await analytics.log(user_id, "limit_denied", action="similar")
         await callback.answer(reason or "Лимит исчерпан", show_alert=True)
+        return
+
+    if search_service.is_stub_dataset:
+        await callback.answer("Датасет ещё не загружен", show_alert=True)
         return
 
     payload = callback.data.removeprefix(CALLBACK_SIMILAR)

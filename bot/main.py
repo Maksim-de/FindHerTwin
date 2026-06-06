@@ -84,6 +84,10 @@ async def main() -> None:
 
     logging.info("Инициализация моделей поиска...")
     search_service = FaceSearchService(config_path)
+    if search_service.is_stub_dataset:
+        logging.warning(
+            "Режим заглушки: загрузите датасет в Amvera Data (index, raw, processed, metadata)"
+        )
     db = Database(db_path)
     usage_service = UsageService(telegram_cfg, db)
 

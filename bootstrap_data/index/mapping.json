@@ -1,0 +1,25 @@
+{
+  "total_faces": 1,
+  "total_actresses": 1,
+  "embedding_dim": 512,
+  "embeddings_ready": true,
+  "faiss_ready": false,
+  "stub": true,
+  "entries": [
+    {
+      "index": 0,
+      "slug": "demo",
+      "face_path": "data/processed/demo/face_000.jpg",
+      "has_embedding": true
+    }
+  ],
+  "actresses": {
+    "demo": {
+      "name": "Demo — загрузите датасет в Amvera Data",
+      "thumbnail": null,
+      "profile_url": null,
+      "indices": [0],
+      "face_count": 1
+    }
+  }
+}
