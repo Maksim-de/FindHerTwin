@@ -13,10 +13,10 @@ from typing import Any
 from aiogram.types import CallbackQuery, Message
 
 from bot.menu import (
-    BTN_BALANCE,
-    BTN_BUY,
-    BTN_HELP,
-    BTN_NEW_PHOTO,
+    BTN_BALANCE_ALL,
+    BTN_BUY_ALL,
+    BTN_HELP_ALL,
+    BTN_NEW_PHOTO_ALL,
     CALLBACK_NEW_PHOTO,
 )
 from bot.results_ui import CALLBACK_NAV, CALLBACK_SIMILAR
@@ -68,14 +68,14 @@ def classify_incoming(event: Message | CallbackQuery) -> tuple[int, str, dict[st
         if text.startswith("/"):
             cmd = text.split()[0].lstrip("/").split("@")[0]
             return user_id, "command", {"command": cmd}
-        menu_map = {
-            BTN_NEW_PHOTO: "menu_new_photo",
-            BTN_BUY: "menu_buy",
-            BTN_BALANCE: "menu_balance",
-            BTN_HELP: "menu_help",
-        }
-        if text in menu_map:
-            return user_id, menu_map[text], {}
+        if text in BTN_NEW_PHOTO_ALL:
+            return user_id, "menu_new_photo", {}
+        if text in BTN_BUY_ALL:
+            return user_id, "menu_buy", {}
+        if text in BTN_BALANCE_ALL:
+            return user_id, "menu_balance", {}
+        if text in BTN_HELP_ALL:
+            return user_id, "menu_help", {}
         if text:
             return user_id, "text_message", {"preview": text[:40]}
         return user_id, "message_other", {}

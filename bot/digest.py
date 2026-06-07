@@ -12,6 +12,7 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 
 from bot.analytics import EventLogger
 from bot.db import Database
+from bot.i18n import lang_from_code
 from bot.results_ui import deliver_digest_results, to_stored
 from face.search_service import ActressMatch, FaceSearchService
 
@@ -55,7 +56,10 @@ async def send_digest_to_user(
     source: ActressMatch,
     matches: list[ActressMatch],
     analytics: EventLogger | None = None,
+    *,
+    db: Database | None = None,
 ) -> bool:
+    lang = lang_from_code(db.get_user_language(user_id) if db else None)
     try:
         face_num = source.face_crop.stem.removeprefix("face_")
         embedding = await asyncio.to_thread(
@@ -70,6 +74,7 @@ async def send_digest_to_user(
             search_service,
             user_id,
             query_embedding=query_vec,
+            lang=lang,
         )
         if analytics:
             await analytics.log(
@@ -141,7 +146,7 @@ async def run_digest_scheduler(
 
             for user_id in user_ids:
                 sent = await send_digest_to_user(
-                    bot, user_id, search_service, source, matches, analytics
+                    bot, user_id, search_service, source, matches, analytics, db=db
                 )
                 if sent:
                     await asyncio.to_thread(db.mark_digest_sent, user_id)

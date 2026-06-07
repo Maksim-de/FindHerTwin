@@ -40,7 +40,7 @@ class SearchSession:
 
 
 class SearchSessionCache:
-    def __init__(self, ttl_seconds: int = 3600, max_sessions: int = 5000) -> None:
+    def __init__(self, ttl_seconds: int = 86400, max_sessions: int = 5000) -> None:
         self.ttl_seconds = ttl_seconds
         self.max_sessions = max_sessions
         self._sessions: dict[str, SearchSession] = {}

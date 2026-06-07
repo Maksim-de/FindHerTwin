@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from bot.db import Database
+from bot.i18n import Lang, lang_from_code, product_description, product_title, t
 from bot.payments.products import Product, load_products
 
 
@@ -37,18 +38,25 @@ class UsageService:
     async def _run(self, fn, *args):
         return await asyncio.to_thread(fn, *args)
 
-    def _grant_product_sync(self, user_id: int, product_id: str) -> str:
+    def _user_lang(self, user_id: int) -> Lang:
+        return lang_from_code(self.db.get_user_language(user_id))
+
+    def _grant_product_sync(self, user_id: int, product_id: str, lang: Lang) -> str:
         product = self.products[product_id]
         if product.credits > 0:
             self.db.add_credits(user_id, product.credits)
-            return f"Начислено {product.credits} поисков."
+            return t(lang, "granted_credits", credits=product.credits)
         until = self.db.extend_unlimited(user_id, product.unlimited_days)
-        return f"Безлимит активен до {until.astimezone(self.timezone).strftime('%d.%m.%Y %H:%M')}."
+        until_str = until.astimezone(self.timezone).strftime("%d.%m.%Y %H:%M")
+        return t(lang, "granted_unlimited", until=until_str)
 
-    async def grant_product(self, user_id: int, product_id: str) -> str:
-        return await self._run(self._grant_product_sync, user_id, product_id)
+    async def grant_product(self, user_id: int, product_id: str, lang: Lang | None = None) -> str:
+        resolved = lang or self._user_lang(user_id)
+        return await self._run(self._grant_product_sync, user_id, product_id, resolved)
 
-    async def can_search(self, user_id: int) -> tuple[bool, str | None]:
+    async def can_search(
+        self, user_id: int, lang: Lang | None = None
+    ) -> tuple[bool, str | None]:
         if not self.limits_enabled:
             return True, None
 
@@ -60,10 +68,29 @@ class UsageService:
         if summary["credits"] > 0:
             return True, None
 
-        return False, (
-            "Лимит исчерпан.\n\n"
-            f"Бесплатно: {self.free_daily_limit} поиска в день.\n"
-            "Купите пакет или безлимит — /buy"
+        resolved = lang or self._user_lang(user_id)
+        return False, t(resolved, "limit_exhausted", limit=self.free_daily_limit)
+
+    def localized_product(self, product_id: str, lang: Lang) -> Product:
+        product = self.products[product_id]
+        return Product(
+            id=product.id,
+            title=product_title(
+                lang,
+                product_id,
+                credits=product.credits,
+                days=product.unlimited_days,
+            ),
+            description=product_description(
+                lang,
+                product_id,
+                credits=product.credits,
+                days=product.unlimited_days,
+            ),
+            credits=product.credits,
+            unlimited_days=product.unlimited_days,
+            stars_amount=product.stars_amount,
+            usdt_amount=product.usdt_amount,
         )
 
     async def record_search(self, user_id: int) -> None:
@@ -86,8 +113,18 @@ class UsageService:
 
         self.db.use_credit(user_id)
 
-    async def touch_user(self, user_id: int) -> None:
-        await self._run(self.db.ensure_user, user_id)
+    async def touch_user(
+        self, user_id: int, *, language_code: str | None = None
+    ) -> None:
+        await self._run(self._touch_user_sync, user_id, language_code)
+
+    def _touch_user_sync(self, user_id: int, language_code: str | None) -> None:
+        self.db.ensure_user(user_id)
+        if language_code:
+            self.db.set_user_language(user_id, language_code)
+
+    def get_stored_lang(self, user_id: int) -> Lang:
+        return self._user_lang(user_id)
 
     async def get_summary(self, user_id: int) -> dict:
         return await self._run(

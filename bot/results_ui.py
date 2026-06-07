@@ -14,6 +14,7 @@ from aiogram.types import (
 )
 from pathlib import Path
 
+from bot.i18n import Lang, t
 from bot.menu import CALLBACK_NEW_PHOTO
 from bot.session_cache import SearchSession, SearchSessionCache, StoredMatch
 from face.search_service import ActressMatch, FaceSearchService
@@ -80,6 +81,7 @@ def results_keyboard(
     total: int,
     *,
     has_source: bool,
+    lang: Lang = "ru",
 ) -> InlineKeyboardMarkup:
     nav_row = [
         InlineKeyboardButton(
@@ -91,7 +93,7 @@ def results_keyboard(
     if has_source:
         nav_row.append(
             InlineKeyboardButton(
-                text="• ⭐ •" if current_rank == 0 else "⭐ Дня",
+                text="• ⭐ •" if current_rank == 0 else t(lang, "btn_star_of_day"),
                 callback_data=f"{CALLBACK_NAV}{session_id}:0",
             )
         )
@@ -100,13 +102,13 @@ def results_keyboard(
             nav_row,
             [
                 InlineKeyboardButton(
-                    text="🔍 Найти похожих",
+                    text=t(lang, "btn_find_similar"),
                     callback_data=f"{CALLBACK_SIMILAR}{session_id}:{current_rank}",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="📷 Новое фото",
+                    text=t(lang, "btn_new_photo_inline"),
                     callback_data=CALLBACK_NEW_PHOTO,
                 )
             ],
@@ -120,25 +122,34 @@ def format_caption(
     *,
     similar_to: str | None = None,
     is_digest: bool = False,
+    lang: Lang = "ru",
 ) -> str:
     lines: list[str] = []
     if is_digest and similar_to:
-        lines.append(f"🎲 <b>Актриса дня: {similar_to}</b>")
+        lines.append(t(lang, "digest_title", name=similar_to))
         lines.append("")
     elif similar_to:
-        lines.append(f"Похожие на <b>{similar_to}</b>")
+        lines.append(t(lang, "similar_to", name=similar_to))
         lines.append("")
 
-    lines.append("<b>Top-5 похожих актрис:</b>")
+    lines.append(t(lang, "top5_title"))
     for match in matches:
         lines.append(f"{match.rank}. {match.name} — {int(match.score * 100)}%")
 
     lines.append("")
     if current_rank == 0 and similar_to:
-        lines.append(f"<b>⭐ {similar_to} — актриса дня</b>")
+        lines.append(t(lang, "digest_star", name=similar_to))
     else:
         current = next((m for m in matches if m.rank == current_rank), matches[0])
-        lines.append(f"<b>#{current.rank} {current.name} — {int(current.score * 100)}%</b>")
+        lines.append(
+            t(
+                lang,
+                "match_line",
+                rank=current.rank,
+                name=current.name,
+                score=int(current.score * 100),
+            )
+        )
     return "\n".join(lines)
 
 
@@ -163,12 +174,13 @@ async def _send_card(
     has_source: bool = False,
     reply_to_message_id: int | None = None,
     session: SearchSession | None = None,
+    lang: Lang = "ru",
 ) -> None:
     keyboard = results_keyboard(
-        session_id, current_rank, len(matches), has_source=has_source
+        session_id, current_rank, len(matches), has_source=has_source, lang=lang
     )
     caption = format_caption(
-        matches, current_rank, similar_to=similar_to, is_digest=is_digest
+        matches, current_rank, similar_to=similar_to, is_digest=is_digest, lang=lang
     )
     photo = _photo_for(search_service, current, session)
 
@@ -183,7 +195,7 @@ async def _send_card(
         )
         return
 
-    caption += "\n\n<i>Нет safe-фото (только explicit-кадры).</i>"
+    caption += f"\n\n<i>{t(lang, 'no_safe_photo')}</i>"
     await bot.send_message(
         chat_id,
         caption,
@@ -207,6 +219,7 @@ async def send_match_card(
     has_source: bool = False,
     reply_to_message_id: int | None = None,
     session: SearchSession | None = None,
+    lang: Lang = "ru",
 ) -> None:
     await _send_card(
         bot,
@@ -221,6 +234,7 @@ async def send_match_card(
         has_source=has_source,
         reply_to_message_id=reply_to_message_id,
         session=session,
+        lang=lang,
     )
 
 
@@ -233,18 +247,21 @@ async def update_match_card(
     search_service: FaceSearchService,
     session_id: str,
     session: SearchSession,
+    lang: Lang = "ru",
 ) -> None:
     keyboard = results_keyboard(
         session_id,
         current_rank,
         len(matches),
         has_source=session.source is not None,
+        lang=lang,
     )
     caption = format_caption(
         matches,
         current_rank,
         similar_to=session.similar_to,
         is_digest=session.is_digest,
+        lang=lang,
     )
     photo = _photo_for(search_service, current, session)
 
@@ -261,14 +278,14 @@ async def update_match_card(
         await bot.edit_message_caption(
             chat_id=message.chat.id,
             message_id=message.message_id,
-            caption=caption + "\n\n<i>Нет safe-фото (только explicit-кадры).</i>",
+            caption=caption + f"\n\n<i>{t(lang, 'no_safe_photo')}</i>",
             parse_mode="HTML",
             reply_markup=keyboard,
         )
         return
 
     text = caption + (
-        "\n\n<i>Нет safe-фото (только explicit-кадры).</i>" if not photo else ""
+        f"\n\n<i>{t(lang, 'no_safe_photo')}</i>" if not photo else ""
     )
     if photo:
         await message.delete()
@@ -301,11 +318,11 @@ async def deliver_search_results(
     is_digest: bool = False,
     reply_to_message_id: int | None = None,
     query_embedding: list[float] | None = None,
+    lang: Lang = "ru",
 ) -> None:
     if not matches:
         await message.answer(
-            "Лицо не найдено на фото.\n\n"
-            "Попробуйте другое: лицо крупно, анфас, хорошее освещение.",
+            t(lang, "no_face"),
             reply_to_message_id=reply_to_message_id,
         )
         return
@@ -332,6 +349,7 @@ async def deliver_search_results(
         has_source=source is not None,
         reply_to_message_id=reply_to_message_id,
         session=session,
+        lang=lang,
     )
 
 
@@ -343,6 +361,7 @@ async def deliver_digest_results(
     search_service: FaceSearchService,
     user_id: int,
     query_embedding: list[float] | None = None,
+    lang: Lang = "ru",
 ) -> None:
     if not matches:
         return
@@ -368,4 +387,5 @@ async def deliver_digest_results(
         is_digest=True,
         has_source=True,
         session=session,
+        lang=lang,
     )

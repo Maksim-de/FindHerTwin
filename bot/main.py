@@ -32,10 +32,12 @@ from bot.handlers import router as search_router
 from bot.menu import setup_bot_commands
 from bot.analytics import EventLogger
 from bot.analytics_middleware import AnalyticsMiddleware
+from bot.locale_middleware import LocaleMiddleware
 from bot.middleware import InjectMiddleware
 from bot.payment_handlers import router as payment_router
 from bot.payments.crypto_pay import CryptoPayClient
 from bot.usage import UsageService
+from face.dataset_status import describe_dataset, resolve_data_root
 from face.search_service import FaceSearchService
 
 load_dotenv(PROJECT_ROOT / ".env")
@@ -74,19 +76,26 @@ async def main() -> None:
     temp_dir = PROJECT_ROOT / "bot" / "temp"
     temp_dir.mkdir(parents=True, exist_ok=True)
 
+    data_root = resolve_data_root(PROJECT_ROOT)
     welcome_photo_cfg = telegram_cfg.get("welcome_photo")
-    welcome_photo = (
-        PROJECT_ROOT / welcome_photo_cfg if welcome_photo_cfg else None
-    )
-    if welcome_photo and not welcome_photo.exists():
-        logging.warning("welcome_photo не найден: %s", welcome_photo)
-        welcome_photo = None
+    welcome_photo = None
+    if welcome_photo_cfg:
+        welcome_photo = PROJECT_ROOT / welcome_photo_cfg
+        if not welcome_photo.exists():
+            rel = Path(welcome_photo_cfg)
+            if rel.parts and rel.parts[0] == "data":
+                welcome_photo = data_root / Path(*rel.parts[1:])
+        if not welcome_photo.exists():
+            logging.warning("welcome_photo не найден: %s", welcome_photo_cfg)
+            welcome_photo = None
 
+    logging.info("Data: %s", describe_dataset(data_root, project_root=PROJECT_ROOT))
     logging.info("Инициализация моделей поиска...")
     search_service = FaceSearchService(config_path)
     if search_service.is_stub_dataset:
         logging.warning(
-            "Режим заглушки: загрузите датасет в Amvera Data (index, raw, processed, metadata)"
+            "Режим заглушки: %s",
+            describe_dataset(search_service.data_root, project_root=PROJECT_ROOT),
         )
     db = Database(db_path)
     usage_service = UsageService(telegram_cfg, db)
@@ -123,6 +132,12 @@ async def main() -> None:
     analytics_mw = AnalyticsMiddleware(analytics)
     dp.message.middleware(analytics_mw)
     dp.callback_query.middleware(analytics_mw)
+
+    locale_mw = LocaleMiddleware(usage_service)
+    search_router.message.middleware(locale_mw)
+    search_router.callback_query.middleware(locale_mw)
+    payment_router.message.middleware(locale_mw)
+    payment_router.callback_query.middleware(locale_mw)
 
     middleware = InjectMiddleware(
         search_service,

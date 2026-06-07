@@ -9,13 +9,14 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, FSInputFile, Message
 
 from bot.analytics import EventLogger
+from bot.callback_utils import safe_callback_answer
+from bot.i18n import Lang, help_text_bilingual, t
 from bot.menu import (
-    BTN_BALANCE,
-    BTN_BUY,
-    BTN_HELP,
-    BTN_NEW_PHOTO,
+    BTN_BALANCE_ALL,
+    BTN_BUY_ALL,
+    BTN_HELP_ALL,
+    BTN_NEW_PHOTO_ALL,
     CALLBACK_NEW_PHOTO,
-    NEW_PHOTO_PROMPT,
     main_menu_keyboard,
 )
 from bot.results_ui import (
@@ -29,35 +30,30 @@ from bot.results_ui import (
     update_match_card,
 )
 from bot.usage import UsageService
+from face.dataset_status import describe_dataset
 from face.search_service import FaceSearchService
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 logger = logging.getLogger(__name__)
 
 router = Router()
 
-STUB_DATASET_MESSAGE = (
-    "⏳ <b>Бот запущен, датасет ещё не загружен.</b>\n\n"
-    "В Amvera: Репозиторий → <b>Data</b> → загрузите папки "
-    "<code>index</code>, <code>raw</code>, <code>processed</code>, <code>metadata</code>.\n"
-    "После загрузки перезапустите приложение — поиск заработает."
-)
 
-
-def _welcome_text(usage_service: UsageService) -> str:
-    limits_line = (
-        f"🆓 {usage_service.free_daily_limit} бесплатных поиска в день"
-        if usage_service.limits_enabled
-        else "🧪 Тестовый режим — лимиты отключены"
-    )
+def _welcome_text(lang: Lang, usage_service: UsageService) -> str:
     pack = usage_service.products["pack_15"]
-    unlimited = usage_service.products["unlimited"]
+    unlimited = usage_service.localized_product("unlimited", lang)
+    limits_line = (
+        t(lang, "welcome_limits_free", limit=usage_service.free_daily_limit)
+        if usage_service.limits_enabled
+        else t(lang, "welcome_limits_off")
+    )
     return (
-        "Привет! Я ищу похожих порноактрис по фото.\n\n"
-        "Отправьте фотографию девушки — верну top-5 похожих порноактрис.\n\n"
+        f"{t(lang, 'welcome_intro')}\n\n"
         f"{limits_line}\n"
-        f"💎 {pack.credits} поисков — ${pack.usdt_amount}\n"
-        f"♾ {unlimited.title} — ${unlimited.usdt_amount}\n\n"
-        "Меню внизу — поиск, тарифы, баланс."
+        f"{t(lang, 'welcome_pack', credits=pack.credits, price=pack.usdt_amount)}\n"
+        f"{t(lang, 'welcome_unlimited', title=unlimited.title, price=unlimited.usdt_amount)}\n\n"
+        f"{t(lang, 'welcome_footer')}"
     )
 
 
@@ -65,13 +61,11 @@ def _welcome_text(usage_service: UsageService) -> str:
 async def cmd_start(
     message: Message,
     usage_service: UsageService,
+    lang: Lang,
     welcome_photo: Path | None = None,
 ) -> None:
-    if message.from_user:
-        await usage_service.touch_user(message.from_user.id)
-
-    text = _welcome_text(usage_service)
-    keyboard = main_menu_keyboard()
+    text = _welcome_text(lang, usage_service)
+    keyboard = main_menu_keyboard(lang)
 
     if welcome_photo and welcome_photo.exists():
         await message.answer_photo(
@@ -84,43 +78,50 @@ async def cmd_start(
     await message.answer(text, reply_markup=keyboard)
 
 
-@router.message(Command("help"))
-async def cmd_help(message: Message) -> None:
+@router.message(Command("dataset"))
+async def cmd_dataset(message: Message, search_service: FaceSearchService, lang: Lang) -> None:
+    status = describe_dataset(search_service.data_root, project_root=PROJECT_ROOT)
+    mode = t(lang, "dataset_stub") if search_service.is_stub_dataset else t(lang, "dataset_ready")
     await message.answer(
-        "<b>Как пользоваться</b>\n\n"
-        "1. Отправьте фото (не как файл, а как изображение)\n"
-        "2. Дождитесь анализа (~3–5 сек)\n"
-        "3. Получите top-5 с фото лучшего совпадения\n"
-        "4. Кнопки <b>1–5</b> — переключение между актрисами\n"
-        "5. <b>⭐ Дня</b> — актриса дня (в подборке)\n"
-        "6. <b>Найти похожих</b> — похожие на выбранную\n"
-        "7. <b>Новое фото</b> — новый поиск\n\n"
-        "<b>Меню внизу:</b> 📷 Новое фото · 💎 Тарифы · 📊 Баланс · ❓ Помощь\n\n"
-        "<b>Советы для точности</b>\n"
-        "• Лицо крупно и чётко\n"
-        "• Анфас или лёгкий поворот\n"
-        "• Без сильных фильтров\n\n"
-        "<i>Score &gt; 70% — уверенное совпадение</i>",
+        f"<b>{t(lang, 'dataset_status_title')}:</b> {mode}\n\n<code>{status}</code>",
         parse_mode="HTML",
-        reply_markup=main_menu_keyboard(),
+    )
+
+
+@router.message(Command("help"))
+async def cmd_help(message: Message, lang: Lang) -> None:
+    await message.answer(
+        help_text_bilingual(),
+        parse_mode="HTML",
+        reply_markup=main_menu_keyboard(lang),
     )
 
 
 @router.message(Command("search"))
-async def cmd_search(message: Message) -> None:
-    await message.answer(NEW_PHOTO_PROMPT, parse_mode="HTML", reply_markup=main_menu_keyboard())
+async def cmd_search(message: Message, lang: Lang) -> None:
+    await message.answer(
+        t(lang, "new_photo_prompt"),
+        parse_mode="HTML",
+        reply_markup=main_menu_keyboard(lang),
+    )
 
 
-@router.message(F.text == BTN_NEW_PHOTO)
-async def menu_new_photo(message: Message) -> None:
-    await message.answer(NEW_PHOTO_PROMPT, parse_mode="HTML", reply_markup=main_menu_keyboard())
+@router.message(F.text.in_(BTN_NEW_PHOTO_ALL))
+async def menu_new_photo(message: Message, lang: Lang) -> None:
+    await message.answer(
+        t(lang, "new_photo_prompt"),
+        parse_mode="HTML",
+        reply_markup=main_menu_keyboard(lang),
+    )
 
 
 @router.callback_query(F.data == CALLBACK_NEW_PHOTO)
-async def inline_new_photo(callback: CallbackQuery) -> None:
+async def inline_new_photo(callback: CallbackQuery, lang: Lang) -> None:
     if callback.message:
         await callback.message.answer(
-            NEW_PHOTO_PROMPT, parse_mode="HTML", reply_markup=main_menu_keyboard()
+            t(lang, "new_photo_prompt"),
+            parse_mode="HTML",
+            reply_markup=main_menu_keyboard(lang),
         )
     await callback.answer()
 
@@ -131,24 +132,24 @@ async def handle_photo(
     bot: Bot,
     search_service: FaceSearchService,
     usage_service: UsageService,
+    lang: Lang,
     temp_dir: Path,
     analytics: EventLogger | None = None,
 ) -> None:
     user_id = message.from_user.id if message.from_user else 0
-    await usage_service.touch_user(user_id)
 
-    allowed, reason = await usage_service.can_search(user_id)
+    allowed, reason = await usage_service.can_search(user_id, lang)
     if not allowed:
         if analytics:
             await analytics.log(user_id, "limit_denied", action="photo_search")
-        await message.answer(reason or "Лимит запросов исчерпан.", parse_mode="HTML")
+        await message.answer(reason or t(lang, "limit_fallback"), parse_mode="HTML")
         return
 
     if search_service.is_stub_dataset:
-        await message.answer(STUB_DATASET_MESSAGE, parse_mode="HTML")
+        await message.answer(t(lang, "stub_dataset"), parse_mode="HTML")
         return
 
-    status_msg = await message.answer("Анализирую фото…")
+    status_msg = await message.answer(t(lang, "analyzing"))
 
     photo = message.photo[-1]
     temp_path = temp_dir / f"{user_id}_{photo.file_id}.jpg"
@@ -156,7 +157,7 @@ async def handle_photo(
     try:
         file = await bot.get_file(photo.file_id)
         if not file.file_path:
-            await status_msg.edit_text("Не удалось скачать фото.")
+            await status_msg.edit_text(t(lang, "download_failed"))
             return
         await bot.download_file(file.file_path, destination=temp_path)
 
@@ -185,12 +186,13 @@ async def handle_photo(
             search_service,
             user_id,
             query_embedding=query_vec,
+            lang=lang,
         )
     except Exception as exc:
         logger.exception("Ошибка поиска для user=%s: %s", user_id, exc)
         if analytics:
             await analytics.log(user_id, "search_failed", kind="photo")
-        await status_msg.edit_text("Произошла ошибка при обработке. Попробуйте позже.")
+        await status_msg.edit_text(t(lang, "search_error"))
     finally:
         temp_path.unlink(missing_ok=True)
 
@@ -200,26 +202,33 @@ async def handle_nav(
     callback: CallbackQuery,
     bot: Bot,
     search_service: FaceSearchService,
+    lang: Lang,
 ) -> None:
     if not callback.message or not callback.from_user or not callback.data:
-        await callback.answer()
+        await safe_callback_answer(callback)
         return
 
     parsed = parse_session_callback(callback.data.removeprefix(CALLBACK_NAV))
     if parsed is None:
-        await callback.answer("Устаревшая кнопка", show_alert=True)
+        await safe_callback_answer(callback, t(lang, "stale_button"), show_alert=True)
         return
 
     session_id, rank = parsed
     session = session_cache.get(session_id, callback.from_user.id)
     if session is None:
-        await callback.answer("Сессия устарела — отправьте фото снова", show_alert=True)
+        await safe_callback_answer(
+            callback,
+            t(lang, "session_expired"),
+            show_alert=True,
+        )
         return
 
     current = resolve_view(search_service, session, rank)
     if current is None:
-        await callback.answer("Нет такой позиции", show_alert=True)
+        await safe_callback_answer(callback, t(lang, "no_such_rank"), show_alert=True)
         return
+
+    await safe_callback_answer(callback)
 
     matches = session_to_matches(search_service, session)
     try:
@@ -232,11 +241,11 @@ async def handle_nav(
             search_service,
             session_id,
             session,
+            lang=lang,
         )
-        await callback.answer()
     except Exception as exc:
         logger.exception("Ошибка nav rank=%s: %s", rank, exc)
-        await callback.answer("Не удалось обновить фото", show_alert=True)
+        await callback.message.answer(t(lang, "update_photo_failed"))
 
 
 @router.callback_query(F.data.startswith(CALLBACK_SIMILAR))
@@ -245,22 +254,25 @@ async def handle_similar(
     bot: Bot,
     search_service: FaceSearchService,
     usage_service: UsageService,
+    lang: Lang,
     analytics: EventLogger | None = None,
 ) -> None:
     if not callback.message or not callback.from_user or not callback.data:
-        await callback.answer()
+        await safe_callback_answer(callback)
         return
 
     user_id = callback.from_user.id
-    allowed, reason = await usage_service.can_search(user_id)
+    allowed, reason = await usage_service.can_search(user_id, lang)
     if not allowed:
         if analytics:
             await analytics.log(user_id, "limit_denied", action="similar")
-        await callback.answer(reason or "Лимит исчерпан", show_alert=True)
+        await safe_callback_answer(
+            callback, reason or t(lang, "limit_fallback"), show_alert=True
+        )
         return
 
     if search_service.is_stub_dataset:
-        await callback.answer("Датасет ещё не загружен", show_alert=True)
+        await safe_callback_answer(callback, t(lang, "dataset_not_loaded"), show_alert=True)
         return
 
     payload = callback.data.removeprefix(CALLBACK_SIMILAR)
@@ -269,11 +281,15 @@ async def handle_similar(
         session_id, rank = parsed
         session = session_cache.get(session_id, user_id)
         if session is None:
-            await callback.answer("Сессия устарела — отправьте фото снова", show_alert=True)
+            await safe_callback_answer(
+                callback,
+                t(lang, "session_expired"),
+                show_alert=True,
+            )
             return
         stored = session.get_view(rank)
         if stored is None:
-            await callback.answer("Нет такой позиции", show_alert=True)
+            await safe_callback_answer(callback, t(lang, "no_such_rank"), show_alert=True)
             return
         slug = stored.slug
         face_num = stored.face_num
@@ -281,13 +297,14 @@ async def handle_similar(
     else:
         slug, _, face_num = payload.rpartition(":")
         if not slug:
-            await callback.answer("Некорректные данные", show_alert=True)
+            await safe_callback_answer(callback, t(lang, "bad_payload"), show_alert=True)
             return
         actress_name = search_service.get_actress_name(slug)
 
-    await callback.answer()
+    await safe_callback_answer(callback)
     status_msg = await callback.message.answer(
-        f"Ищу похожих на <b>{actress_name}</b>…", parse_mode="HTML"
+        t(lang, "similar_search", name=actress_name),
+        parse_mode="HTML",
     )
 
     try:
@@ -321,58 +338,54 @@ async def handle_similar(
             similar_to=actress_name,
             reply_to_message_id=callback.message.message_id,
             query_embedding=query_vec,
+            lang=lang,
         )
     except Exception as exc:
         logger.exception("Ошибка similar для user=%s slug=%s: %s", user_id, slug, exc)
         if analytics:
             await analytics.log(user_id, "search_failed", kind="similar", source_slug=slug)
-        await status_msg.edit_text("Произошла ошибка. Попробуйте позже.")
+        await status_msg.edit_text(t(lang, "similar_error"))
 
 
 @router.message(F.document)
-async def handle_document(message: Message) -> None:
+async def handle_document(message: Message, lang: Lang) -> None:
     if message.document and message.document.mime_type and message.document.mime_type.startswith(
         "image/"
     ):
-        await message.answer(
-            "Отправьте фото как <b>изображение</b>, не как файл.\n"
-            "Или сожмите фото — Telegram пришлёт его как картинку.",
-            parse_mode="HTML",
-        )
+        await message.answer(t(lang, "send_as_image"), parse_mode="HTML")
         return
-    await message.answer("Пришлите фотографию девушки для поиска.")
+    await message.answer(t(lang, "send_photo_prompt"))
 
 
-@router.message(F.text == BTN_HELP)
-async def menu_help(message: Message) -> None:
-    await cmd_help(message)
+@router.message(F.text.in_(BTN_HELP_ALL))
+async def menu_help(message: Message, lang: Lang) -> None:
+    await cmd_help(message, lang)
 
 
-@router.message(F.text == BTN_BALANCE)
-async def menu_balance(message: Message, usage_service: UsageService) -> None:
+@router.message(F.text.in_(BTN_BALANCE_ALL))
+async def menu_balance(message: Message, usage_service: UsageService, lang: Lang) -> None:
     from bot.payment_handlers import cmd_balance
 
-    await cmd_balance(message, usage_service)
+    await cmd_balance(message, usage_service, lang)
 
 
-@router.message(F.text == BTN_BUY)
+@router.message(F.text.in_(BTN_BUY_ALL))
 async def menu_buy(
     message: Message,
     usage_service: UsageService,
+    lang: Lang,
     crypto_enabled: bool,
     stars_enabled: bool,
 ) -> None:
     from bot.payment_handlers import cmd_buy
 
-    await cmd_buy(message, usage_service, crypto_enabled, stars_enabled)
+    await cmd_buy(message, usage_service, crypto_enabled, stars_enabled, lang)
 
 
 @router.message()
-async def handle_other(message: Message, usage_service: UsageService) -> None:
-    if message.from_user:
-        await usage_service.touch_user(message.from_user.id)
+async def handle_other(message: Message, lang: Lang) -> None:
     await message.answer(
-        "Нажмите <b>📷 Новое фото</b> в меню или просто пришлите изображение.",
+        t(lang, "fallback_hint"),
         parse_mode="HTML",
-        reply_markup=main_menu_keyboard(),
+        reply_markup=main_menu_keyboard(lang),
     )

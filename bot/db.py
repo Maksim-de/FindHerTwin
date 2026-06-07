@@ -68,6 +68,8 @@ class Database:
         }
         if "last_digest_at" not in columns:
             conn.execute("ALTER TABLE users ADD COLUMN last_digest_at TEXT")
+        if "language_code" not in columns:
+            conn.execute("ALTER TABLE users ADD COLUMN language_code TEXT")
 
     @staticmethod
     def _parse_dt(value: str | None) -> datetime | None:
@@ -78,6 +80,24 @@ class Database:
     @staticmethod
     def _now_iso() -> str:
         return datetime.now(timezone.utc).isoformat()
+
+    def get_user_language(self, user_id: int) -> str | None:
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT language_code FROM users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            return row["language_code"]
+
+    def set_user_language(self, user_id: int, language_code: str) -> None:
+        self.ensure_user(user_id)
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "UPDATE users SET language_code = ? WHERE user_id = ?",
+                (language_code, user_id),
+            )
 
     def ensure_user(self, user_id: int) -> UserRecord:
         with self._lock, self._connect() as conn:

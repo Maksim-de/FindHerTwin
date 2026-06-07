@@ -11,6 +11,12 @@ import numpy as np
 import yaml
 from PIL import Image
 
+from face.dataset_status import (
+    describe_dataset,
+    is_real_dataset,
+    resolve_data_path,
+    resolve_data_root,
+)
 from face.detector import FaceDetector, get_device
 from face.encoder import FaceEncoder
 from face.index_store import FaceIndex, SearchResult
@@ -44,18 +50,24 @@ class FaceSearchService:
         paths = self.config.get("paths", {})
         face_cfg = self.config.get("face", {})
 
-        self.index_dir = PROJECT_ROOT / paths.get("index", "data/index")
-        self.metadata_dir = PROJECT_ROOT / paths.get("metadata", "data/metadata")
+        self.data_root = resolve_data_root(PROJECT_ROOT)
+        data_root = self.data_root
+        self.index_dir = data_root / "index"
+        self.metadata_dir = data_root / "metadata"
         self.top_k = face_cfg.get("search_top_k", 5)
         self.min_prob = face_cfg.get("min_face_probability", 0.90)
 
-        logger.info("Загрузка индекса...")
+        logger.info(
+            "Загрузка индекса... (%s)",
+            describe_dataset(data_root, project_root=PROJECT_ROOT),
+        )
         self.face_index = FaceIndex(self.index_dir)
         self.face_index.load()
-        self.is_stub_dataset = bool(self.face_index.mapping.get("stub", False))
+        self.is_stub_dataset = not is_real_dataset(data_root)
         if self.is_stub_dataset:
             logger.warning(
-                "Датасет-заглушка: поиск отключён до загрузки index/ в Amvera Data"
+                "Датасет-заглушка: поиск отключён. Проверьте Amvera Data: "
+                "index/mapping.json и index/embeddings.npy в корне /app/data"
             )
 
         logger.info("Загрузка FaceNet (устройство: %s)...", get_device())
@@ -64,9 +76,11 @@ class FaceSearchService:
         self._metadata_cache: dict[str, dict] = {}
         nsfw_cfg = self.config.get("nsfw", {})
         self.nsfw_enabled = nsfw_cfg.get("enabled", True)
-        labels_file = PROJECT_ROOT / nsfw_cfg.get(
-            "labels_file", "data/metadata/nsfw_labels.json"
-        )
+        labels_file = data_root / "metadata" / "nsfw_labels.json"
+        if not labels_file.exists():
+            labels_file = PROJECT_ROOT / nsfw_cfg.get(
+                "labels_file", "data/metadata/nsfw_labels.json"
+            )
         self.nsfw_labels_ready = labels_file.exists()
         self.nsfw_store = NsfwLabelStore(labels_file) if self.nsfw_enabled else None
         if self.nsfw_enabled and not self.nsfw_labels_ready:
@@ -88,7 +102,7 @@ class FaceSearchService:
         score: float,
         profile_url: str | None = None,
     ) -> ActressMatch:
-        face_crop = PROJECT_ROOT / "data" / "processed" / slug / f"face_{face_num}.jpg"
+        face_crop = self.data_root / "processed" / slug / f"face_{face_num}.jpg"
         raw_photo = self._guess_raw_path(face_crop)
         if profile_url is None:
             profile_url = self._load_metadata(slug).get("profile_url")
@@ -112,15 +126,13 @@ class FaceSearchService:
         self._metadata_cache[slug] = data
         return data
 
-    @staticmethod
-    def _resolve_face_path(face_path: str) -> Path:
-        path = Path(face_path)
-        return path if path.is_absolute() else PROJECT_ROOT / path
+    def _resolve_face_path(self, face_path: str) -> Path:
+        return resolve_data_path(self.data_root, face_path)
 
     def _guess_raw_path(self, face_path: Path) -> Path | None:
         slug = face_path.parent.name
         face_num = face_path.stem.removeprefix("face_")
-        raw_dir = PROJECT_ROOT / "data" / "raw" / slug
+        raw_dir = self.data_root / "raw" / slug
         for ext in IMAGE_EXTENSIONS:
             candidate = raw_dir / f"{face_num}{ext}"
             if candidate.exists():
@@ -225,7 +237,7 @@ class FaceSearchService:
                     return raw
             return None
 
-        raw_dir = PROJECT_ROOT / "data" / "raw" / match.slug
+        raw_dir = self.data_root / "raw" / match.slug
         return self.nsfw_store.find_sendable_photo(
             match.slug, raw_dir, prefer=match.raw_photo
         )

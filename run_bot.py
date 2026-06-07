@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import shutil
@@ -14,39 +13,37 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from face.dataset_status import describe_dataset, is_real_dataset, resolve_data_root
+
 ROOT = Path(__file__).resolve().parent
-DATA_ROOT = ROOT / "data"
 logger = logging.getLogger(__name__)
 
 
-def _is_real_index(index_dir: Path) -> bool:
-    mapping_path = index_dir / "mapping.json"
-    if not mapping_path.is_file():
-        return False
-    try:
-        mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return False
-    return not mapping.get("stub", False)
-
-
-def seed_stub_dataset(data_root: Path) -> bool:
+def seed_stub_dataset(project_root: Path) -> bool:
     """Копирует минимальный индекс, если реальный датасет ещё не загружен."""
-    index_dir = data_root / "index"
+    data_root = resolve_data_root(project_root)
+    index_dir = project_root / "data" / "index"
 
-    if _is_real_index(index_dir):
+    if is_real_dataset(data_root):
+        logger.info(
+            "Полный датасет найден: %s",
+            describe_dataset(data_root, project_root=ROOT),
+        )
         return False
 
-    if (index_dir / "mapping.json").is_file():
-        logger.warning("Индекс помечен как stub — ждём загрузку полного датасета в Amvera Data")
+    logger.warning(
+        "Датасет не готов: %s",
+        describe_dataset(data_root, project_root=ROOT),
+    )
 
     bootstrap = ROOT / "bootstrap_data"
+    canonical = project_root / "data"
     if bootstrap.is_dir():
         for name in ("index", "metadata", "raw", "processed"):
             src = bootstrap / name
             if not src.exists():
                 continue
-            dest = data_root / name
+            dest = canonical / name
             dest.mkdir(parents=True, exist_ok=True)
             for item in src.iterdir():
                 target = dest / item.name
@@ -60,7 +57,7 @@ def seed_stub_dataset(data_root: Path) -> bool:
     if not embeddings_path.is_file():
         np.save(embeddings_path, np.zeros((1, 512), dtype=np.float32))
 
-    face_path = data_root / "processed" / "demo" / "face_000.jpg"
+    face_path = canonical / "processed" / "demo" / "face_000.jpg"
     if not face_path.is_file():
         face_path.parent.mkdir(parents=True, exist_ok=True)
         Image.new("RGB", (160, 160), color=(96, 96, 96)).save(face_path, quality=85)
@@ -75,8 +72,8 @@ def setup_data_dirs() -> None:
     os.chdir(ROOT)
     (ROOT / "logs").mkdir(exist_ok=True)
     for name in ("raw", "processed", "index", "metadata"):
-        (DATA_ROOT / name).mkdir(parents=True, exist_ok=True)
-    seed_stub_dataset(DATA_ROOT)
+        (ROOT / "data" / name).mkdir(parents=True, exist_ok=True)
+    seed_stub_dataset(ROOT)
 
 
 def main() -> None:

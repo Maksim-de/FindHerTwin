@@ -14,8 +14,8 @@ from aiogram.types import (
 )
 
 from bot.analytics import EventLogger
+from bot.i18n import Lang, t
 from bot.payments.crypto_pay import CryptoPayClient
-from bot.payments.products import Product
 from bot.usage import UsageService
 
 logger = logging.getLogger(__name__)
@@ -29,12 +29,14 @@ CALLBACK_CHECK_CRYPTO = "check_crypto:"
 
 
 def _buy_keyboard(
-    products: dict[str, Product],
+    usage_service: UsageService,
+    lang: Lang,
     crypto_enabled: bool,
     stars_enabled: bool,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
-    for product in products.values():
+    for product_id in usage_service.products:
+        product = usage_service.localized_product(product_id, lang)
         row: list[InlineKeyboardButton] = []
         if stars_enabled:
             row.append(
@@ -55,31 +57,41 @@ def _buy_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _format_balance(summary: dict, free_daily_limit: int, limits_enabled: bool) -> str:
+def _format_balance(
+    summary: dict, free_daily_limit: int, limits_enabled: bool, lang: Lang
+) -> str:
     if not limits_enabled:
-        return "<b>Баланс</b>\n\nЛимиты отключены (тестовый режим)."
+        return f"{t(lang, 'balance_title')}\n\n{t(lang, 'balance_limits_off')}"
 
-    lines = ["<b>Баланс</b>", ""]
+    lines = [t(lang, "balance_title"), ""]
     if summary["unlimited_active"]:
         until = summary["unlimited_until"]
         until_str = until.strftime("%d.%m.%Y %H:%M") if until else "—"
-        lines.append(f"♾ Безлимит до: <b>{until_str}</b>")
+        lines.append(t(lang, "balance_unlimited", until=until_str))
     else:
-        lines.append(f"🆓 Бесплатно сегодня: <b>{summary['daily_left']}</b> из {free_daily_limit}")
-        lines.append(f"💳 Платные поиски: <b>{summary['credits']}</b>")
+        lines.append(
+            t(
+                lang,
+                "balance_free",
+                left=summary["daily_left"],
+                limit=free_daily_limit,
+            )
+        )
+        lines.append(t(lang, "balance_credits", credits=summary["credits"]))
     lines.append("")
-    lines.append("Тарифы: /buy")
+    lines.append(t(lang, "balance_footer"))
     return "\n".join(lines)
 
 
 @router.message(Command("balance"))
-async def cmd_balance(message: Message, usage_service: UsageService) -> None:
+async def cmd_balance(message: Message, usage_service: UsageService, lang: Lang) -> None:
     user_id = message.from_user.id if message.from_user else 0
     summary = await usage_service.get_summary(user_id)
     text = _format_balance(
         summary,
         usage_service.free_daily_limit,
         usage_service.limits_enabled,
+        lang,
     )
     await message.answer(text, parse_mode="HTML")
 
@@ -90,25 +102,22 @@ async def cmd_buy(
     usage_service: UsageService,
     crypto_enabled: bool,
     stars_enabled: bool,
+    lang: Lang,
 ) -> None:
-    products = usage_service.products
+    pack = usage_service.localized_product("pack_15", lang)
+    unlimited = usage_service.localized_product("unlimited", lang)
     text = (
-        "<b>Тарифы</b>\n\n"
-        f"🆓 <b>Бесплатно</b> — {usage_service.free_daily_limit} поиска в день\n"
-        f"💎 <b>{products['pack_15'].title}</b> — ${products['pack_15'].usdt_amount} "
-        f"({products['pack_15'].stars_amount} Stars)\n"
-        f"♾ <b>{products['unlimited'].title}</b> — ${products['unlimited'].usdt_amount} "
-        f"({products['unlimited'].stars_amount} Stars)\n\n"
-        "Выберите способ оплаты:"
+        f"{t(lang, 'buy_title')}\n\n"
+        f"{t(lang, 'buy_free', limit=usage_service.free_daily_limit)}\n"
+        f"💎 <b>{pack.title}</b> — ${pack.usdt_amount} ({pack.stars_amount} Stars)\n"
+        f"♾ <b>{unlimited.title}</b> — ${unlimited.usdt_amount} "
+        f"({unlimited.stars_amount} Stars)\n\n"
+        f"{t(lang, 'buy_choose')}"
     )
     await message.answer(
         text,
         parse_mode="HTML",
-        reply_markup=_buy_keyboard(
-            products,
-            crypto_enabled=crypto_enabled,
-            stars_enabled=stars_enabled,
-        ),
+        reply_markup=_buy_keyboard(usage_service, lang, crypto_enabled, stars_enabled),
     )
 
 
@@ -117,16 +126,17 @@ async def on_stars_buy(
     callback: CallbackQuery,
     usage_service: UsageService,
     stars_enabled: bool,
+    lang: Lang,
 ) -> None:
     if not stars_enabled:
-        await callback.answer("Оплата Stars отключена", show_alert=True)
+        await callback.answer(t(lang, "stars_disabled"), show_alert=True)
         return
     if not callback.message or not callback.from_user:
         await callback.answer()
         return
 
     product_id = callback.data.removeprefix(CALLBACK_STARS)
-    product = usage_service.get_product(product_id)
+    product = usage_service.localized_product(product_id, lang)
     user_id = callback.from_user.id
     payload = f"{product_id}:{user_id}"
 
@@ -147,16 +157,17 @@ async def on_crypto_buy(
     usage_service: UsageService,
     crypto_pay: CryptoPayClient,
     crypto_enabled: bool,
+    lang: Lang,
 ) -> None:
     if not crypto_enabled:
-        await callback.answer("Crypto Pay не настроен", show_alert=True)
+        await callback.answer(t(lang, "crypto_disabled"), show_alert=True)
         return
     if not callback.message or not callback.from_user:
         await callback.answer()
         return
 
     product_id = callback.data.removeprefix(CALLBACK_CRYPTO)
-    product = usage_service.get_product(product_id)
+    product = usage_service.localized_product(product_id, lang)
     user_id = callback.from_user.id
 
     try:
@@ -167,7 +178,7 @@ async def on_crypto_buy(
         )
     except Exception as exc:
         logger.exception("Crypto invoice error: %s", exc)
-        await callback.answer("Не удалось создать счёт", show_alert=True)
+        await callback.answer(t(lang, "invoice_failed"), show_alert=True)
         return
 
     await usage_service.create_payment(
@@ -180,19 +191,22 @@ async def on_crypto_buy(
 
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Оплатить в CryptoBot", url=invoice.pay_url)],
+            [InlineKeyboardButton(text=t(lang, "crypto_pay_btn"), url=invoice.pay_url)],
             [
                 InlineKeyboardButton(
-                    text="Проверить оплату",
+                    text=t(lang, "crypto_check_btn"),
                     callback_data=f"{CALLBACK_CHECK_CRYPTO}{invoice.invoice_id}",
                 )
             ],
         ]
     )
     await callback.message.answer(
-        f"<b>{product.title}</b>\n"
-        f"Сумма: <b>{product.usdt_amount} USDT</b>\n\n"
-        "Нажмите «Оплатить», затем «Проверить оплату».",
+        t(
+            lang,
+            "crypto_invoice",
+            title=product.title,
+            amount=product.usdt_amount,
+        ),
         parse_mode="HTML",
         reply_markup=keyboard,
     )
@@ -204,6 +218,7 @@ async def on_check_crypto(
     callback: CallbackQuery,
     usage_service: UsageService,
     crypto_pay: CryptoPayClient,
+    lang: Lang,
     analytics: EventLogger | None = None,
 ) -> None:
     if not callback.message or not callback.data:
@@ -215,30 +230,30 @@ async def on_check_crypto(
         invoice = await crypto_pay.get_invoice(invoice_id)
     except Exception as exc:
         logger.exception("Crypto check error: %s", exc)
-        await callback.answer("Ошибка проверки", show_alert=True)
+        await callback.answer(t(lang, "crypto_check_error"), show_alert=True)
         return
 
     if invoice.status != "paid":
-        await callback.answer("Оплата ещё не поступила", show_alert=True)
+        await callback.answer(t(lang, "crypto_not_paid"), show_alert=True)
         return
 
     result = await usage_service.complete_payment(str(invoice_id))
     if result is None:
-        await callback.answer("Уже начислено", show_alert=True)
+        await callback.answer(t(lang, "already_granted"), show_alert=True)
         return
 
     user_id, product_id = result
     if callback.from_user and callback.from_user.id != user_id:
-        await callback.answer("Это не ваш платёж", show_alert=True)
+        await callback.answer(t(lang, "not_your_payment"), show_alert=True)
         return
 
-    msg = await usage_service.grant_product(user_id, product_id)
+    msg = await usage_service.grant_product(user_id, product_id, lang)
     if analytics:
         await analytics.log(
             user_id, "payment_success", provider="crypto", product=product_id
         )
-    await callback.message.answer(f"✅ Оплата получена!\n{msg}")
-    await callback.answer("Готово!")
+    await callback.message.answer(t(lang, "payment_received", details=msg))
+    await callback.answer(t(lang, "payment_done"))
 
 
 @router.pre_checkout_query()
@@ -250,6 +265,7 @@ async def on_pre_checkout(query: PreCheckoutQuery) -> None:
 async def on_successful_payment(
     message: Message,
     usage_service: UsageService,
+    lang: Lang,
     analytics: EventLogger | None = None,
 ) -> None:
     payment = message.successful_payment
@@ -260,14 +276,14 @@ async def on_successful_payment(
     parts = payload.split(":", 1)
     if len(parts) != 2:
         logger.warning("Bad stars payload: %s", payload)
-        await message.answer("Оплата получена, но не удалось начислить. Напишите в поддержку.")
+        await message.answer(t(lang, "payment_support"))
         return
 
     product_id, user_id_str = parts
     user_id = int(user_id_str)
     if user_id != message.from_user.id:
         logger.warning("Stars user mismatch: %s vs %s", user_id, message.from_user.id)
-        await message.answer("Ошибка начисления. Напишите в поддержку.")
+        await message.answer(t(lang, "payment_user_error"))
         return
 
     external_id = payment.telegram_payment_charge_id
@@ -280,12 +296,12 @@ async def on_successful_payment(
     )
     result = await usage_service.complete_payment(external_id)
     if result is None:
-        await message.answer("Платёж уже был обработан ранее.")
+        await message.answer(t(lang, "payment_duplicate"))
         return
 
-    msg = await usage_service.grant_product(user_id, product_id)
+    msg = await usage_service.grant_product(user_id, product_id, lang)
     if analytics:
         await analytics.log(
             user_id, "payment_success", provider="stars", product=product_id
         )
-    await message.answer(f"✅ Оплата получена!\n{msg}")
+    await message.answer(t(lang, "payment_received", details=msg))
